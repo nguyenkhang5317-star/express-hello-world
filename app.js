@@ -2,7 +2,7 @@ const express = require("express");
 const app = express();
 const port = process.env.PORT || 3001;
 
-const html = String.raw\`<!doctype html>
+const html = String.raw`<!doctype html>
 <html lang="vi">
 <head>
   <meta charset="utf-8">
@@ -246,7 +246,7 @@ const html = String.raw\`<!doctype html>
     });
   </script>
 </body>
-</html>\`;
+</html>`;
 
 app.get("/", (req, res) => {
   res.type("html").send(html);
@@ -257,7 +257,7 @@ app.get("/health", (req, res) => {
 });
 
 const server = app.listen(port, () => {
-  console.log(\`AFTERDARK listening on port \${port}\`);
+  console.log(`AFTERDARK listening on port \${port}`);
 });
 
 server.keepAliveTimeout = 120 * 1000;
