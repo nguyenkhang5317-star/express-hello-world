@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: express-hello-world
+    name: link4m-analyzer
     runtime: node
     plan: free
-    buildCommand: yarn install --frozen-lockfile
-    startCommand: node app.js
+    buildCommand: npm install
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
