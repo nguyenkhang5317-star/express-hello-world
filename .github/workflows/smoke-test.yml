@@ -1,4 +1,4 @@
-name: Smoke test
+name: Link4M Analyzer smoke test
 
 on:
   push:
@@ -15,25 +15,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
-      - name: Start server and smoke-test routes
+        run: npm install
+      - name: Start server and smoke-test
         shell: bash
         run: |
           set -euo pipefail
-          PORT=3001 node app.js > /tmp/afterdark.log 2>&1 &
+          PORT=3001 node app.js > /tmp/link4m-analyzer.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
-            if curl --silent --fail http://127.0.0.1:3001/health > /tmp/health.json; then
-              break
-            fi
+            if curl --silent --fail http://127.0.0.1:3001/health > /tmp/health.json; then break; fi
             sleep 1
           done
           grep -q '"status":"ok"' /tmp/health.json
           curl --silent --fail http://127.0.0.1:3001/ > /tmp/home.html
-          grep -q 'AFTERDARK' /tmp/home.html
-          grep -q 'Explore the' /tmp/home.html
+          grep -q 'Link4M Analyzer' /tmp/home.html
+          grep -q 'Phân tích URL' /tmp/home.html
           echo "Smoke tests passed."
           cat /tmp/health.json
