@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: link4m-analyzer
+    name: wormgpt-code-lab
     runtime: node
     plan: free
     buildCommand: npm install
@@ -8,3 +8,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
