@@ -257,7 +257,7 @@ app.get("/health", (req, res) => {
 });
 
 const server = app.listen(port, () => {
-  console.log(`AFTERDARK listening on port \${port}`);
+  console.log(`AFTERDARK listening on port ${port}`);
 });
 
 server.keepAliveTimeout = 120 * 1000;
