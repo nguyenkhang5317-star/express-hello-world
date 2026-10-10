@@ -1,7 +1,7 @@
 {
-  "name": "link4m-analyzer",
+  "name": "wormgpt-code-lab",
   "version": "1.0.0",
-  "description": "Responsive URL and public redirect analyzer with basic safety checks",
+  "description": "Responsive AI coding workspace using a server-side OpenAI-compatible API",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
