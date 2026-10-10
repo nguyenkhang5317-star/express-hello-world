@@ -1,22 +1,110 @@
-const express=require('express'),dns=require('node:dns').promises,net=require('node:net'),http=require('node:http'),https=require('node:https');
-const app=express(),port=process.env.PORT||3001;app.disable('x-powered-by');app.use(express.json({limit:'8kb'}));
-function pub4(ip){const p=ip.split('.').map(Number);if(p.length!==4)return false;const n=(((p[0]*256+p[1])*256+p[2])*256+p[3])>>>0;const rs=[[0,8],[0x0a000000,8],[0x64400000,10],[0x7f000000,8],[0xa9fe0000,16],[0xac100000,12],[0xc0000000,24],[0xc0000200,24],[0xc0a80000,16],[0xc6120000,15],[0xc6336400,24],[0xcb007100,24],[0xe0000000,4],[0xf0000000,4]];return !rs.some(([b,k])=>{const m=(0xffffffff<<(32-k))>>>0;return(n&m)===((b>>>0)&m)})}
-function pub(ip){const f=net.isIP(ip);return f===4?pub4(ip):f===6&&/^[23][0-9a-f:]+$/i.test(ip)&&!ip.toLowerCase().startsWith('2001:db8:')&&!ip.includes('%')}
-async function check(raw){let u;try{u=new URL(raw)}catch{throw Error('URL không hợp lệ.')}if(!['http:','https:'].includes(u.protocol))throw Error('Chỉ hỗ trợ HTTP/HTTPS.');if(u.username||u.password)throw Error('URL chứa thông tin đăng nhập bị chặn.');if((u.protocol==='http:'&&u.port&&u.port!=='80')||(u.protocol==='https:'&&u.port&&u.port!=='443'))throw Error('Chỉ cho phép cổng 80/443.');const h=u.hostname.toLowerCase().replace('[','').replace(']','');if(!h||h==='localhost'||h.endsWith('.localhost')||h.endsWith('.local')||h.endsWith('.internal')||net.isIP(h))throw Error('Tên máy chủ/IP nội bộ hoặc IP trực tiếp bị chặn.');let a;try{a=await dns.lookup(h,{all:true,verbatim:true})}catch{throw Error('Không phân giải được tên miền.')}if(!a.length||a.some(x=>!pub(x.address)))throw Error('Tên miền phân giải tới địa chỉ không công khai nên đã bị chặn.');return {u,a}}
-function head(u,a){return new Promise((resolve,reject)=>{const t=u.protocol==='https:'?https:http,c=a.find(x=>x.family===4)||a[0],r=t.request(u,{method:'HEAD',timeout:6500,headers:{'User-Agent':'Link4M-Analyzer/1.0','Accept':'*/*'},lookup:(h,o,cb)=>o&&o.all?cb(null,a.map(x=>({address:x.address,family:x.family}))):cb(null,c.address,c.family)},res=>{const d={status:res.statusCode||0,location:res.headers.location||null};res.destroy();resolve(d)});r.on('timeout',()=>r.destroy(Error('Máy chủ phản hồi quá lâu.')));r.on('error',reject);r.end()})}
-app.post('/api/analyze',async(q,s)=>{const input=typeof q.body?.url==='string'?q.body.url.trim():'';if(!input||input.length>2048)return s.status(400).json({error:'Nhập URL hợp lệ, tối đa 2048 ký tự.'});let cur=input;const chain=[],seen=new Set();try{for(let i=0;i<8;i++){const v=await check(cur),url=v.u.toString();if(seen.has(url))throw Error('Phát hiện vòng lặp chuyển hướng.');seen.add(url);const r=await head(v.u,v.a);chain.push({url,host:v.u.hostname,status:r.status});if(!r.location){const warnings=[];if(v.u.protocol!=='https:')warnings.push('URL cuối không dùng HTTPS.');if(r.status>=400)warnings.push('Máy chủ trả HTTP '+r.status+'.');if(chain.length>=5)warnings.push('Có nhiều bước chuyển hướng.');if(/login|verify|captcha|human|challenge|security-check/i.test(v.u.pathname))warnings.push('Đường dẫn có thể liên quan đăng nhập/xác minh; kiểm tra kỹ.');if(!warnings.length)warnings.push('Không thấy dấu hiệu bất thường cơ bản; không phải bảo đảm an toàn.');return s.json({input,finalUrl:url,chain,status:r.status,warnings,note:r.status===405||r.status===501?'Máy chủ không hỗ trợ HEAD nên đích có thể chưa xác định đủ.':'Kiểm tra bằng HEAD; không vượt CAPTCHA/trang xác minh.'})}cur=new URL(r.location,v.u).toString()}s.json({input,finalUrl:cur,chain,status:null,warnings:['Chuỗi chuyển hướng dài bất thường.'],note:'Đã đạt giới hạn 8 bước.'})}catch(e){s.status(422).json({error:e.message||'Không thể phân tích URL.',chain})}});
-app.get('/health',(_q,s)=>s.json({status:'ok'}));
-const html=String.raw`<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090b12"><meta name="description" content="Phân tích URL và chuyển hướng công khai."><title>Link4M Analyzer — URL Safety Lab</title><style>
-:root{color-scheme:dark;--bg:#090b12;--panel:#121a28;--line:#29364b;--text:#eef6ff;--muted:#8d9db5;--cyan:#57f5df}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 12% 0%,#174f5666,transparent 38rem),radial-gradient(ellipse at 95% 20%,#56318a40,transparent 32rem),var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}.wrap{max-width:1080px;margin:auto;padding:0 22px}.top{height:76px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff12}.brand{font-weight:900;letter-spacing:1px}.brand b{color:var(--cyan)}small{display:block;color:var(--muted);font-size:10px;letter-spacing:2px;margin-top:4px}.pill{font-size:10px;color:var(--cyan);border:1px solid #57f5df44;border-radius:99px;padding:9px 12px}.hero{text-align:center;padding:70px 0 30px}.eyebrow{color:var(--cyan);letter-spacing:3px;font-size:11px;font-weight:800}.hero h1{font-size:clamp(40px,7vw,72px);letter-spacing:-3px;line-height:1.03;margin:18px 0}.hero h1 span{color:var(--cyan);text-shadow:0 0 36px #57f5df33}.hero p{color:var(--muted);max-width:650px;margin:auto;line-height:1.8}.search{display:flex;gap:9px;max-width:790px;margin:30px auto 0;padding:8px;background:#111725dd;border:1px solid #35445a;border-radius:17px}.search input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--text);padding:14px}.search input::placeholder{color:#65758d}button{font:inherit;cursor:pointer}.btn{border:0;border-radius:12px;padding:13px 17px;background:linear-gradient(120deg,var(--cyan),#91f5c9);color:#071018;font-weight:850;white-space:nowrap}.btn:disabled{opacity:.5}.ghost{background:#ffffff08;color:var(--text);border:1px solid var(--line)}.hint,.sub{color:var(--muted);font-size:11px;line-height:1.8}.hint{margin-top:12px}.error{display:none;color:#ff9aaa;font-size:13px;margin:14px}.error.show{display:block}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:25px 0 36px}.card,.panel{border:1px solid var(--line);border-radius:17px;background:linear-gradient(145deg,#151d2b,#0e131e);padding:20px}.ico{color:var(--cyan);font-size:22px}.card h3{font-size:14px;margin:12px 0 7px}.card p{font-size:12px;line-height:1.7;color:var(--muted);margin:0}.result{display:none;margin:20px 0 35px}.result.show{display:block}.panel+.panel{margin-top:13px}.panelhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}.panelhead h2{font-size:17px;margin:0}.status{font-size:11px;color:var(--cyan);font-weight:850}.urlout{padding:14px;background:#080c13;border:1px solid var(--line);border-radius:12px;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.warn{padding:11px 13px;border-radius:10px;background:#ffb4540c;border:1px solid #ffb45430;color:#ffd49a;font-size:12px;line-height:1.6;margin-top:8px}.hop{padding:13px 0;border-bottom:1px solid #ffffff10;overflow-wrap:anywhere}.hopurl{font-size:12px;line-height:1.7;margin-top:6px}.history{display:none;margin-bottom:30px}.history.show{display:block}.histrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #ffffff12}.histrow span{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#b8c7dc}.foot{border-top:1px solid #ffffff12;padding:22px 0 35px;color:var(--muted);font-size:11px;line-height:1.8;display:flex;justify-content:space-between;gap:18px}
-@media(max-width:650px){.wrap{padding:0 15px}.top{height:66px}.pill{font-size:9px}.hero{padding:52px 0 22px}.hero h1{letter-spacing:-1.5px}.search{flex-direction:column;padding:9px}.search input{padding:13px 10px}.search .btn{width:100%}.grid{grid-template-columns:1fr;gap:10px}.card,.panel{padding:16px}.foot{display:block}.foot div+div{margin-top:8px}}
-</style></head><body><div class="wrap"><header class="top"><div class="brand">↗ LINK4M <b>ANALYZER</b><small>URL SAFETY LAB / V1.0</small></div><div class="pill">● PUBLIC LINK CHECKER</div></header>
-<section class="hero"><div class="eyebrow">INSPECT · TRACE · STAY SAFE</div><h1>Know where your<br><span>link leads.</span></h1><p>Kiểm tra URL, theo dõi chuyển hướng công khai và nhận cảnh báo cơ bản trước khi mở liên kết. Không tự động vượt trang xác minh.</p><form id="form" class="search"><input id="url" type="url" placeholder="https://link4m.com/..." autocomplete="url" maxlength="2048" required aria-label="URL cần phân tích"><button class="btn" id="submit">⌁ Phân tích URL</button></form><div class="hint">HTTP/HTTPS công khai · Tối đa 8 bước · Không bypass CAPTCHA</div><div id="error" class="error" role="alert"></div></section>
-<section id="result" class="result" aria-live="polite"><div class="panel"><div class="panelhead"><div><div class="status">● PHÂN TÍCH HOÀN TẤT</div><h2 style="margin-top:9px">URL đích được xác định</h2></div><div class="sub" id="status"></div></div><div class="sub">URL cuối cùng quan sát được</div><div id="final" class="urlout"></div><div class="actions"><button class="btn" id="copyfinal">Sao chép URL đích</button><button class="btn ghost" id="openfinal">Mở URL</button><button class="btn ghost" id="copyall">Sao chép báo cáo</button></div><div id="warnings"></div></div><div class="panel"><div class="panelhead"><h2>Chuỗi chuyển hướng</h2><span class="sub" id="hopcount"></span></div><div id="chain"></div><div id="note" class="sub"></div></div></section>
-<section class="grid"><article class="card"><div class="ico">⌁</div><h3>Redirect tracing</h3><p>Hiển thị mã trạng thái và từng URL chuyển hướng công khai.</p></article><article class="card"><div class="ico">⛨</div><h3>URL safety checks</h3><p>Cảnh báo dấu hiệu đáng ngờ và chặn địa chỉ mạng nội bộ.</p></article><article class="card"><div class="ico">⧉</div><h3>Copy & review</h3><p>Sao chép URL đích hoặc báo cáo để tự xem xét.</p></article></section>
-<section id="history" class="panel history"><div class="panelhead"><h2>Lịch sử trên thiết bị</h2><button id="clear" class="btn ghost">Xóa lịch sử</button></div><div id="historylist"></div><div class="sub">Lịch sử lưu trong trình duyệt này, không đồng bộ tài khoản.</div></section><footer class="foot"><div><b style="color:#eaf4ff">LINK4M ANALYZER</b><br>Công cụ kiểm tra URL có trách nhiệm.</div><div>Kết quả chỉ mang tính tham khảo. Máy chủ có thể không công khai redirect qua HEAD; HTTPS không bảo đảm an toàn.</div></footer></div>
-<script>
-const $=id=>document.getElementById(id);let latest=null;function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function hist(){try{return JSON.parse(localStorage.getItem('l4ma-history')||'[]')}catch{return []}}function renderHist(){const a=hist();$('history').classList.toggle('show',a.length>0);$('historylist').innerHTML=a.map(u=>'<div class="histrow"><span>'+esc(u)+'</span><button class="btn ghost" data-url="'+encodeURIComponent(u)+'">Dùng lại</button></div>').join('')}function save(u){localStorage.setItem('l4ma-history',JSON.stringify([u,...hist().filter(x=>x!==u)].slice(0,5)));renderHist()}$('historylist').addEventListener('click',e=>{const b=e.target.closest('[data-url]');if(b)$('url').value=decodeURIComponent(b.dataset.url)});$('clear').addEventListener('click',()=>{localStorage.removeItem('l4ma-history');renderHist()});
-$('form').addEventListener('submit',async e=>{e.preventDefault();$('error').classList.remove('show');$('result').classList.remove('show');$('submit').disabled=true;$('submit').textContent='Đang kiểm tra…';try{const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value.trim()})});const d=await r.json();if(!r.ok)throw Error(d.error||'Không thể phân tích URL');latest=d;render(d);save(d.input)}catch(err){$('error').textContent=err.message||'Đã xảy ra lỗi.';$('error').classList.add('show')}finally{$('submit').disabled=false;$('submit').textContent='⌁ Phân tích URL'}});
-function render(d){$('final').textContent=d.finalUrl||'Chưa xác định';$('status').textContent=d.status?'HTTP '+d.status:'HTTP không xác định';$('hopcount').textContent=(d.chain||[]).length+' bước';$('chain').innerHTML=(d.chain||[]).map((h,i)=>'<div class="hop"><div class="status">BƯỚC '+(i+1)+' · HTTP '+h.status+'</div><div class="hopurl">'+esc(h.url)+'</div><div class="sub">Tên miền: '+esc(h.host)+'</div></div>').join('');$('note').textContent=d.note||'';$('warnings').innerHTML=(d.warnings||[]).map(w=>'<div class="warn">⚠ '+esc(w)+'</div>').join('');$('result').classList.add('show');$('result').scrollIntoView({behavior:'smooth',block:'start'})}async function copy(s){try{await navigator.clipboard.writeText(s);return true}catch{const t=document.createElement('textarea');t.value=s;document.body.appendChild(t);t.select();const ok=document.execCommand('copy');t.remove();return ok}}$('copyfinal').addEventListener('click',async()=>{if(latest){$('copyfinal').textContent=await copy(latest.finalUrl)?'Đã sao chép ✓':'Không sao chép được';setTimeout(()=>$('copyfinal').textContent='Sao chép URL đích',1500)}});$('copyall').addEventListener('click',async()=>{if(latest){const s='Link4M Analyzer report\\nInput: '+latest.input+'\\nFinal: '+latest.finalUrl+'\\nChain:\\n'+(latest.chain||[]).map((h,i)=>(i+1)+'. ['+h.status+'] '+h.url).join('\\n')+'\\nWarnings: '+(latest.warnings||[]).join(' | ');$('copyall').textContent=await copy(s)?'Đã sao chép ✓':'Không sao chép được';setTimeout(()=>$('copyall').textContent='Sao chép báo cáo',1500)}});$('openfinal').addEventListener('click',()=>{if(latest){try{const u=new URL(latest.finalUrl);if(['http:','https:'].includes(u.protocol))window.open(u.href,'_blank','noopener,noreferrer')}catch{}}});renderHist();
-</script></body></html>`;
-app.get('/',(_q,s)=>s.type('html').send(html));app.listen(port,'0.0.0.0',()=>console.log('Link4M Analyzer listening on port '+port));
+const express = require('express');
+const path = require('node:path');
+
+const app = express();
+const port = Number(process.env.PORT || 3001);
+app.disable('x-powered-by');
+app.use(express.json({ limit: '24kb' }));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+
+const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+const model = process.env.OPENAI_MODEL || '';
+const apiKey = process.env.OPENAI_API_KEY || '';
+
+app.get('/health', (_req, res) => res.json({ status: 'ok', app: 'WormGPT Code Lab' }));
+app.get('/api/status', (_req, res) => {
+  let safeBase = '';
+  try { safeBase = new URL(baseUrl).origin + new URL(baseUrl).pathname.replace(/\/+$/, ''); } catch {}
+  res.json({ configured: Boolean(apiKey && model), baseUrl: safeBase, model: model || '' });
+});
+
+app.post('/api/chat', async (req, res) => {
+  const messages = req.body && req.body.messages;
+  const mode = typeof req.body?.mode === 'string' ? req.body.mode.slice(0, 60) : 'General coding';
+  const language = req.body?.language === 'English' ? 'English' : 'Vietnamese';
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 24) {
+    return res.status(400).json({ error: 'Messages must be an array with 1–24 items.' });
+  }
+  const clean = [];
+  let total = 0;
+  for (const m of messages) {
+    if (!m || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string') {
+      return res.status(400).json({ error: 'Invalid message format.' });
+    }
+    const content = m.content.slice(0, 12000);
+    total += content.length;
+    clean.push({ role: m.role, content });
+  }
+  if (total > 20000) return res.status(413).json({ error: 'Conversation is too large. Send a shorter prompt.' });
+  if (!apiKey || !model) {
+    return res.status(503).json({
+      error: 'AI provider is not configured yet. Set OPENAI_API_KEY and OPENAI_MODEL in the hosting environment. OPENAI_BASE_URL is optional for OpenAI-compatible providers.'
+    });
+  }
+  let endpoint;
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+      return res.status(400).json({ error: 'Provider URL must use HTTPS, except for local development.' });
+    }
+    endpoint = new URL(baseUrl + '/chat/completions').toString();
+  } catch {
+    return res.status(400).json({ error: 'OPENAI_BASE_URL is not a valid URL.' });
+  }
+
+  const systemPrompt = [
+    'You are a highly capable software engineering assistant inside Code Lab.',
+    'Help with practical programming, project architecture, debugging, code review, tests, documentation, and defensive security.',
+    'Be precise. State assumptions. When generating multi-file projects, label each file path and provide complete code where practical.',
+    'Do not claim to have executed or tested code unless a tool actually did so. Point out relevant limitations and security risks.',
+    'Do not provide malware, credential theft, unauthorized access, or instructions to evade security protections. Offer safe alternatives when needed.',
+    'Reply in ' + language + '. Current task mode: ' + mode + '.'
+  ].join('\n');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90000);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: systemPrompt }, ...clean],
+        temperature: 0.25,
+        max_tokens: 4096,
+        stream: false
+      }),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const providerMessage = data?.error?.message || data?.message || ('Provider returned HTTP ' + response.status);
+      return res.status(502).json({ error: String(providerMessage).slice(0, 700) });
+    }
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      return res.status(502).json({ error: 'The provider response did not contain a text answer. Check that the configured model supports chat completions.' });
+    }
+    return res.json({ content, model: data.model || model, usage: data.usage || null, demo: false });
+  } catch (error) {
+    const message = error.name === 'AbortError'
+      ? 'The model request timed out after 90 seconds.'
+      : 'Could not reach the configured AI provider. Check the base URL and provider status.';
+    return res.status(502).json({ error: message });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+app.use((err, _req, res, _next) => {
+  if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Request body is too large.' });
+  res.status(500).json({ error: 'Unexpected server error.' });
+});
+
+app.listen(port, '0.0.0.0', () => {
+  console.log('WormGPT Code Lab listening on port ' + port);
+});
